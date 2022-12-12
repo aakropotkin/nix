@@ -1610,7 +1610,6 @@ static RegisterPrimOp primop_findFile(RegisterPrimOp::Info {
     .arity = 2,
     .fun = prim_findFile,
 });
-
 /* Return the cryptographic hash of a file in base-16. */
 static void prim_hashFile(EvalState & state, const PosIdx pos, Value * * args, Value & v)
 {
@@ -1638,6 +1637,29 @@ static RegisterPrimOp primop_hashFile({
     .fun = prim_hashFile,
 });
 
+
+static void prim_readFileType(EvalState & state, const PosIdx pos, Value * * args, Value & v)
+{
+    auto path = realisePath(state, pos, *args[0]);
+    /* Enum DT_(DIR|LNK|REG) */
+    auto type = getFileType( path );
+    v.mkString(
+        type == DT_REG ? "regular" :
+        type == DT_DIR ? "directory" :
+        type == DT_LNK ? "symlink" :
+        "unknown");
+}
+
+static RegisterPrimOp primop_readFileType({
+    .name = "__readFileType",
+    .args = {"p"},
+    .doc = R"(
+      Determine the directory entry type of a file, being
+      one of "directory", "regular", "symlink", or "unknown".
+    )",
+    .fun = prim_readFileType,
+});
+
 /* Read a directory (without . or ..) */
 static void prim_readDir(EvalState & state, const PosIdx pos, Value * * args, Value & v)
 {
@@ -1648,13 +1670,20 @@ static void prim_readDir(EvalState & state, const PosIdx pos, Value * * args, Va
     auto attrs = state.buildBindings(entries.size());
 
     for (auto & ent : entries) {
-        if (ent.type == DT_UNKNOWN)
-            ent.type = getFileType(path + "/" + ent.name);
-        attrs.alloc(ent.name).mkString(
-            ent.type == DT_REG ? "regular" :
-            ent.type == DT_DIR ? "directory" :
-            ent.type == DT_LNK ? "symlink" :
-            "unknown");
+        auto & attr = attrs.alloc(ent.name);
+        if (ent.type == DT_UNKNOWN) {
+            auto epath = state.allocValue();
+            Path path2 = path + "/" + ent.name;
+            epath->mkString( path2 );
+            attr.mkApp( &state.getBuiltin("readFileType"), epath );
+        } else {
+            attr.mkString(
+                ent.type == DT_REG ? "regular" :
+                ent.type == DT_DIR ? "directory" :
+                ent.type == DT_LNK ? "symlink" :
+                "unknown"
+            );
+        }
     }
 
     v.mkAttrs(attrs);
